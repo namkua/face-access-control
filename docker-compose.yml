@@ -4,7 +4,6 @@ services:
   # PostgreSQL Database
   postgres:
     image: postgres:15-alpine
-    container_name: face-recognition-postgres
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-face_recognition}
       POSTGRES_USER: ${POSTGRES_USER:-admin}
@@ -12,7 +11,7 @@ services:
       # Create airflow DB automatically alongside face_recognition DB
       POSTGRES_MULTIPLE_EXTENSIONS: "uuid-ossp"
     ports:
-      - "5432:5432"
+      - "${HOST_PORT_POSTGRES:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql:ro
@@ -27,9 +26,8 @@ services:
   # Redis Cache
   redis:
     image: redis:7-alpine
-    container_name: face-recognition-redis
     ports:
-      - "6379:6379"
+      - "${HOST_PORT_REDIS:-6379}:6379"
     volumes:
       - redis_data:/data
     healthcheck:
@@ -43,12 +41,11 @@ services:
   # Zookeeper for Kafka
   zookeeper:
     image: confluentinc/cp-zookeeper:7.5.0
-    container_name: face-recognition-zookeeper
     environment:
       ZOOKEEPER_CLIENT_PORT: 2181
       ZOOKEEPER_TICK_TIME: 2000
     ports:
-      - "2181:2181"
+      - "${HOST_PORT_ZOOKEEPER:-2181}:2181"
     volumes:
       - zookeeper_data:/var/lib/zookeeper/data
       - zookeeper_logs:/var/lib/zookeeper/log
@@ -58,7 +55,6 @@ services:
   # Kafka Message Broker
   kafka:
     image: confluentinc/cp-kafka:7.5.0
-    container_name: face-recognition-kafka
     depends_on:
       - zookeeper
     environment:
@@ -70,7 +66,7 @@ services:
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
     ports:
-      - "29092:29092"
+      - "${HOST_PORT_KAFKA:-29092}:29092"
     volumes:
       - kafka_data:/var/lib/kafka/data
     healthcheck:
@@ -84,7 +80,6 @@ services:
   # Kafka UI
   kafka-ui:
     image: provectuslabs/kafka-ui:latest
-    container_name: face-recognition-kafka-ui
     depends_on:
       - kafka
     environment:
@@ -101,7 +96,6 @@ services:
     build:
       context: ./streaming/kafka_connect
       dockerfile: Dockerfile
-    container_name: face-recognition-kafka-connect
     depends_on:
       kafka:
         condition: service_healthy
@@ -136,7 +130,6 @@ services:
   # Kafka Connect Auto-Setup
   kafka-connect-setup:
     image: alpine:latest
-    container_name: face-recognition-kafka-connect-setup
     depends_on:
       kafka-connect:
         condition: service_healthy
@@ -162,14 +155,13 @@ services:
   # MinIO Object Storage
   minio:
     image: minio/minio:latest
-    container_name: face-recognition-minio
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-minioadmin}
       MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-minioadmin}
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      - "${HOST_PORT_MINIO_1:-9000}:9000"
+      - "${HOST_PORT_MINIO_2:-9001}:9001"
     volumes:
       - minio_data:/data
     healthcheck:
@@ -183,7 +175,6 @@ services:
   # Prometheus Monitoring
   prometheus:
     image: prom/prometheus:latest
-    container_name: face-recognition-prometheus
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
       - '--storage.tsdb.path=/prometheus'
@@ -207,7 +198,6 @@ services:
   # Grafana Dashboards
   grafana:
     image: grafana/grafana:latest
-    container_name: face-recognition-grafana
     depends_on:
       - prometheus
     environment:
@@ -227,7 +217,6 @@ services:
   # Jaeger Tracing (all-in-one, in-memory storage for local dev)
   jaeger:
     image: jaegertracing/all-in-one:1.53
-    container_name: face-recognition-jaeger
     environment:
       COLLECTOR_ZIPKIN_HOST_PORT: ":9411"
       # Use memory storage for local dev to avoid /badger permission issues.
@@ -258,7 +247,6 @@ services:
     build:
       context: ./airflow
       dockerfile: Dockerfile
-    container_name: face-recognition-airflow
     user: "50000:0"
     environment:
       AIRFLOW__CORE__EXECUTOR: LocalExecutor
@@ -305,7 +293,6 @@ services:
   #   python scripts/export_facenet_onnx.py
   triton:
     image: nvcr.io/nvidia/tritonserver:23.10-py3
-    container_name: face-recognition-triton
     command: tritonserver --model-repository=/models --strict-model-config=false --log-verbose=0
     volumes:
       - ./models:/models:ro
@@ -326,7 +313,6 @@ services:
   # Feast Online Feature Server
   feast:
     image: python:3.10-slim
-    container_name: face-recognition-feast
     depends_on:
       redis:
         condition: service_healthy
@@ -362,7 +348,6 @@ services:
     build:
       context: .
       dockerfile: api/Dockerfile
-    container_name: face-recognition-api
     depends_on:
       postgres:
         condition: service_healthy
@@ -412,7 +397,6 @@ services:
   # PostgreSQL Exporter
   postgres-exporter:
     image: prometheuscommunity/postgres-exporter:v0.15.0
-    container_name: face-recognition-postgres-exporter
     depends_on:
       postgres:
         condition: service_healthy
@@ -427,7 +411,6 @@ services:
   # Redis Exporter
   redis-exporter:
     image: oliver006/redis_exporter:v1.55.0
-    container_name: face-recognition-redis-exporter
     depends_on:
       redis:
         condition: service_healthy
@@ -442,7 +425,6 @@ services:
   # Kafka Exporter
   kafka-exporter:
     image: danielqsj/kafka-exporter:v1.7.0
-    container_name: face-recognition-kafka-exporter
     depends_on:
       kafka:
         condition: service_healthy
@@ -458,7 +440,6 @@ services:
   # Node Exporter (host metrics — CPU, memory, disk)
   node-exporter:
     image: prom/node-exporter:v1.7.0
-    container_name: face-recognition-node-exporter
     command:
       - '--path.rootfs=/host'
       - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
@@ -477,7 +458,6 @@ services:
       context: ./streaming/fraud_detector
       dockerfile: Dockerfile
     image: face-recognition-custom-flink:latest
-    container_name: face-recognition-flink-jobmanager
     command: jobmanager
     environment:
       FLINK_PROPERTIES: |
@@ -500,7 +480,6 @@ services:
       context: ./streaming/fraud_detector
       dockerfile: Dockerfile
     image: face-recognition-custom-flink:latest
-    container_name: face-recognition-flink-taskmanager
     command: taskmanager
     environment:
       FLINK_PROPERTIES: |
@@ -519,7 +498,6 @@ services:
       context: ./streaming/fraud_detector
       dockerfile: Dockerfile
     image: face-recognition-custom-flink:latest
-    container_name: face-recognition-flink-fraud-detector
     command: [ "flink", "run", "-m", "flink-jobmanager:8081", "-py", "/opt/flink/usrlib/flink_fraud_detector.py" ]
     depends_on:
       flink-jobmanager:
@@ -545,7 +523,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: face-recognition-jenkins
+    user: root
     ports:
       - "8082:8080"
       - "50000:50000"

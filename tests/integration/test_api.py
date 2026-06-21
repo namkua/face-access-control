@@ -4,6 +4,7 @@ Test suite for Face Recognition API.
 import pytest
 import asyncio
 from httpx import AsyncClient
+from unittest.mock import AsyncMock, MagicMock, patch
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
 
@@ -97,8 +98,18 @@ async def test_health_check(client):
 # ============================================================================
 
 @pytest.mark.asyncio
-async def test_create_user(client):
+@patch("api.app.httpx.AsyncClient")
+async def test_create_user(mock_client_cls, client):
     """Test unified user enrollment with an image."""
+    # Setup mock client
+    mock_client = AsyncMock()
+    mock_client_cls.return_value.__aenter__.return_value = mock_client
+    
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {"dag_run_id": "test_run_id"}
+    mock_client.post.return_value = mock_response
+    
     # Mock image bytes
     img_data = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15c4\x00\x00\x00\nIDATx\x9cc\x00\x01\x00\x00\x05\x00\x01\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82"
     files = [("files", ("face.png", img_data, "image/png"))]
