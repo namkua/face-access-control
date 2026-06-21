@@ -1,0 +1,23 @@
+# Jaeger Configuration (local development)
+#
+# In K8s this runs as jaegertracing/all-in-one with in-memory or badger storage.
+# For local Docker we use badger (persistent) so traces survive restarts.
+# The Elasticsearch backend is used only in production — see helm/monitoring/jaeger.
+
+collector:
+  zipkin:
+    host-port: ":9411"
+
+query:
+  base-path: /jaeger
+
+# Local dev: use badger (embedded key/value store).
+# Storage type is set via SPAN_STORAGE_TYPE env var in docker-compose.yml.
+storage:
+  type: badger
+
+sampling:
+  strategies-file: /etc/jaeger/sampling_strategies.json
+
+metrics-backend: prometheus
+metrics-http-route: /metrics

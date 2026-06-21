@@ -1,0 +1,572 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: face-recognition-postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-face_recognition}
+      POSTGRES_USER: ${POSTGRES_USER:-admin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme123}
+      # Create airflow DB automatically alongside face_recognition DB
+      POSTGRES_MULTIPLE_EXTENSIONS: "uuid-ossp"
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql:ro
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-admin} -d ${POSTGRES_DB:-face_recognition}" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - face-recognition-network
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    container_name: face-recognition-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - face-recognition-network
+
+  # Zookeeper for Kafka
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    container_name: face-recognition-zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - "2181:2181"
+    volumes:
+      - zookeeper_data:/var/lib/zookeeper/data
+      - zookeeper_logs:/var/lib/zookeeper/log
+    networks:
+      - face-recognition-network
+
+  # Kafka Message Broker
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: face-recognition-kafka
+    depends_on:
+      - zookeeper
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+    ports:
+      - "29092:29092"
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+    healthcheck:
+      test: [ "CMD-SHELL", "kafka-broker-api-versions --bootstrap-server localhost:9092" ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    networks:
+      - face-recognition-network
+
+  # Kafka UI
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: face-recognition-kafka-ui
+    depends_on:
+      - kafka
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+      KAFKA_CLUSTERS_0_ZOOKEEPER: zookeeper:2181
+    ports:
+      - "8080:8080"
+    networks:
+      - face-recognition-network
+
+  # Kafka Connect (for Discord HTTP Sink)
+  kafka-connect:
+    build:
+      context: ./streaming/kafka_connect
+      dockerfile: Dockerfile
+    container_name: face-recognition-kafka-connect
+    depends_on:
+      kafka:
+        condition: service_healthy
+    environment:
+      CONNECT_BOOTSTRAP_SERVERS: 'kafka:9092'
+      CONNECT_REST_ADVERTISED_HOST_NAME: kafka-connect
+      CONNECT_REST_PORT: 8083
+      CONNECT_GROUP_ID: compose-connect-group
+      CONNECT_CONFIG_STORAGE_TOPIC: docker-connect-configs
+      CONNECT_CONFIG_STORAGE_REPLICATION_FACTOR: 1
+      CONNECT_OFFSET_FLUSH_INTERVAL_MS: 10000
+      CONNECT_OFFSET_STORAGE_TOPIC: docker-connect-offsets
+      CONNECT_OFFSET_STORAGE_REPLICATION_FACTOR: 1
+      CONNECT_STATUS_STORAGE_TOPIC: docker-connect-status
+      CONNECT_STATUS_STORAGE_REPLICATION_FACTOR: 1
+      CONNECT_KEY_CONVERTER: org.apache.kafka.connect.storage.StringConverter
+      CONNECT_VALUE_CONVERTER: org.apache.kafka.connect.storage.StringConverter
+      CONNECT_INTERNAL_KEY_CONVERTER: org.apache.kafka.connect.json.JsonConverter
+      CONNECT_INTERNAL_VALUE_CONVERTER: org.apache.kafka.connect.json.JsonConverter
+      CONNECT_PLUGIN_PATH: '/usr/share/java,/usr/share/confluent-hub-components'
+    ports:
+      - "8083:8083"
+    healthcheck:
+      test: [ "CMD-SHELL", "wget --spider -q http://localhost:8083/connectors || exit 1" ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - face-recognition-network
+
+  # Kafka Connect Auto-Setup
+  kafka-connect-setup:
+    image: alpine:latest
+    container_name: face-recognition-kafka-connect-setup
+    depends_on:
+      kafka-connect:
+        condition: service_healthy
+    volumes:
+      - ./scripts:/scripts:ro
+    environment:
+      KAFKA_CONNECT_URL: kafka-connect:8083
+      DISCORD_WEBHOOK_URL: ${DISCORD_WEBHOOK_URL}
+    entrypoint: [ "sh", "-c" ]
+    command:
+      - |
+        apk add --no-cache curl jq > /dev/null
+        echo "Waiting for Kafka Connect REST API at kafka-connect:8083..."
+        until curl -sf http://kafka-connect:8083/connectors > /dev/null; do
+          sleep 2
+        done
+        sh /scripts/setup_minio_connector.sh
+        sh /scripts/setup_discord_connector.sh
+        echo "Connectors setup completed."
+    networks:
+      - face-recognition-network
+
+  # MinIO Object Storage
+  minio:
+    image: minio/minio:latest
+    container_name: face-recognition-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-minioadmin}
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:9000/minio/health/live" ]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    networks:
+      - face-recognition-network
+
+  # Prometheus Monitoring
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: face-recognition-prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=15d'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+    depends_on:
+      - postgres-exporter
+      - redis-exporter
+      - kafka-exporter
+      - node-exporter
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./monitoring/prometheus/alerts.yml:/etc/prometheus/alerts.yml
+      - prometheus_data:/prometheus
+    networks:
+      - face-recognition-network
+
+  # Grafana Dashboards
+  grafana:
+    image: grafana/grafana:latest
+    container_name: face-recognition-grafana
+    depends_on:
+      - prometheus
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards
+      - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources
+      - grafana_data:/var/lib/grafana
+    networks:
+      - face-recognition-network
+
+  # Jaeger Tracing (all-in-one, in-memory storage for local dev)
+  jaeger:
+    image: jaegertracing/all-in-one:1.53
+    container_name: face-recognition-jaeger
+    environment:
+      COLLECTOR_ZIPKIN_HOST_PORT: ":9411"
+      # Use memory storage for local dev to avoid /badger permission issues.
+      # Switch to SPAN_STORAGE_TYPE=badger (with a chmod init container) for persistence.
+      SPAN_STORAGE_TYPE: memory
+      METRICS_STORAGE_TYPE: prometheus
+    ports:
+      - "5775:5775/udp"
+      - "6831:6831/udp"
+      - "6832:6832/udp"
+      - "5778:5778"
+      - "16686:16686" #UI
+      - "14268:14268"
+      - "14250:14250"
+      - "9411:9411"
+      - "14269:14269" # Jaeger internal metrics (for Prometheus scrape)
+      - "4317:4317" # OTLP gRPC (for opentelemetry-exporter-otlp-proto-grpc)
+    healthcheck:
+      test: [ "CMD-SHELL", "wget -qO- http://localhost:14269/ || exit 1" ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    networks:
+      - face-recognition-network
+
+  # Apache Airflow (Standalone mode for development)
+  airflow:
+    build:
+      context: ./airflow
+      dockerfile: Dockerfile
+    container_name: face-recognition-airflow
+    user: "50000:0"
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      # Points to the 'airflow' DB created by scripts/init-db.sql
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER:-admin}:${POSTGRES_PASSWORD:-changeme123}@postgres:5432/airflow
+      # Generate a real key: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+      AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY:-46BKJoQYlPPOexq0OhDZnIlNepKFf87WFwLt0efcogo=}
+      AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+      AIRFLOW__WEBSERVER__SECRET_KEY: ${AIRFLOW_SECRET_KEY:-face-recognition-mlops-secret}
+      AIRFLOW__API__AUTH_BACKENDS: 'airflow.api.auth.backend.basic_auth'
+      AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'true'
+      AIRFLOW__LOGGING__LOGGING_LEVEL: INFO
+
+      FEAST_SERVER_URL: "http://feast:6566"
+      FEAST_REPO_PATH: "/feast_repo"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./airflow/logs:/opt/airflow/logs
+      - ./airflow/plugins:/opt/airflow/plugins
+      - ./airflow/batch:/opt/airflow/batch
+      - ./features:/feast_repo
+      - /var/run/docker.sock:/var/run/docker.sock
+    ports:
+      - "8081:8080"
+    command: >
+      bash -c "
+        airflow db migrate &&
+        airflow users create --username admin --password admin --firstname Admin --lastname User --role Admin --email admin@example.com || true &&
+        airflow webserver & airflow scheduler"
+    healthcheck:
+      test: [ "CMD-SHELL", "curl --fail http://localhost:8080/health || exit 1" ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    networks:
+      - face-recognition-network
+
+  # NVIDIA Triton Inference Server (CPU mode)
+  # NOTE: Before starting, generate the ONNX model first:
+  #   python scripts/export_facenet_onnx.py
+  triton:
+    image: nvcr.io/nvidia/tritonserver:23.10-py3
+    container_name: face-recognition-triton
+    command: tritonserver --model-repository=/models --strict-model-config=false --log-verbose=0
+    volumes:
+      - ./models:/models:ro
+    ports:
+      - "8100:8000" # HTTP
+      - "8101:8001" # gRPC
+      - "8102:8002" # Metrics
+    healthcheck:
+      test: [ "CMD-SHELL", "curl -sf http://localhost:8000/v2/health/ready || exit 1" ]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+    networks:
+      - face-recognition-network
+    restart: unless-stopped
+
+  # Feast Online Feature Server
+  feast:
+    image: python:3.10-slim
+    container_name: face-recognition-feast
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    environment:
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      FEAST_REPO_PATH: /feast_repo
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB:-face_recognition}
+      POSTGRES_USER: ${POSTGRES_USER:-admin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme123}
+    volumes:
+      - ./features:/feast_repo
+      - ./scripts/feast_init.sh:/feast_init.sh:ro
+    command: bash /feast_init.sh
+    ports:
+      - "6566:6566"
+    healthcheck:
+      test: [ "CMD-SHELL", "curl -sf http://localhost:6566/health || exit 1" ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 90s
+    networks:
+      - face-recognition-network
+    restart: unless-stopped
+
+  # FastAPI Application
+  api:
+    build:
+      context: .
+      dockerfile: api/Dockerfile
+    container_name: face-recognition-api
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      triton:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-admin}:${POSTGRES_PASSWORD:-changeme123}@postgres:5432/${POSTGRES_DB:-face_recognition}
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-minioadmin}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      JAEGER_AGENT_HOST: jaeger
+      JAEGER_AGENT_PORT: 6831
+      ENVIRONMENT: development
+      # Triton Inference Server – API will use GPU-accelerated inference
+      TRITON_URL: triton:8000
+      TRITON_MODEL_NAME: facenet
+      TRITON_MODEL_VERSION: "1"
+      FEAST_SERVER_URL: "http://feast:6566"
+      FEAST_ENABLED: "true"
+      FEAST_REPO_PATH: "/feast_repo"
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./features:/feast_repo
+      # Mount api source code for hot-reload in development.
+      - ./api:/app/api
+      # Mount features/ to /app/features for Python import correctly
+      - ./features:/app/features
+      # Mount tests/ to /app/tests so local test changes are reflected immediately
+      - ./tests:/app/tests
+    command: [ "uvicorn", "api.app:app", "--host", "0.0.0.0", "--port", "8000", "--reload", "--reload-dir", "/app/api" ]
+    networks:
+      - face-recognition-network
+    restart: unless-stopped
+
+  # ── Metric Exporters (mirror K8s monitoring targets) ──────────────────────
+
+  # PostgreSQL Exporter
+  postgres-exporter:
+    image: prometheuscommunity/postgres-exporter:v0.15.0
+    container_name: face-recognition-postgres-exporter
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATA_SOURCE_NAME: "postgresql://${POSTGRES_USER:-admin}:${POSTGRES_PASSWORD:-changeme123}@postgres:5432/${POSTGRES_DB:-face_recognition}?sslmode=disable"
+    ports:
+      - "9187:9187"
+    networks:
+      - face-recognition-network
+    restart: unless-stopped
+
+  # Redis Exporter
+  redis-exporter:
+    image: oliver006/redis_exporter:v1.55.0
+    container_name: face-recognition-redis-exporter
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      REDIS_ADDR: "redis://redis:6379"
+    ports:
+      - "9121:9121"
+    networks:
+      - face-recognition-network
+    restart: unless-stopped
+
+  # Kafka Exporter
+  kafka-exporter:
+    image: danielqsj/kafka-exporter:v1.7.0
+    container_name: face-recognition-kafka-exporter
+    depends_on:
+      kafka:
+        condition: service_healthy
+    command:
+      - '--kafka.server=kafka:9092'
+      - '--topic.filter=access-logs|events|alerts'
+    ports:
+      - "9308:9308"
+    networks:
+      - face-recognition-network
+    restart: unless-stopped
+
+  # Node Exporter (host metrics — CPU, memory, disk)
+  node-exporter:
+    image: prom/node-exporter:v1.7.0
+    container_name: face-recognition-node-exporter
+    command:
+      - '--path.rootfs=/host'
+      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
+    volumes:
+      - /:/host:ro
+    ports:
+      - "9100:9100"
+    networks:
+      - face-recognition-network
+    restart: unless-stopped
+
+  # ── Flink Fraud Detection Engine ───────────────────────────────────────────
+
+  flink-jobmanager:
+    build:
+      context: ./streaming/fraud_detector
+      dockerfile: Dockerfile
+    image: face-recognition-custom-flink:latest
+    container_name: face-recognition-flink-jobmanager
+    command: jobmanager
+    environment:
+      FLINK_PROPERTIES: |
+        jobmanager.rpc.address: flink-jobmanager
+        rest.flamegraph.enabled: true
+        metrics.reporters: prom
+        metrics.reporter.prom.factory.class: org.apache.flink.metrics.prometheus.PrometheusReporterFactory
+        metrics.reporter.prom.port: 9249
+    ports:
+      - "8088:8081"
+      - "9249:9249"
+    depends_on:
+      kafka:
+        condition: service_healthy
+    networks:
+      - face-recognition-network
+
+  flink-taskmanager:
+    build:
+      context: ./streaming/fraud_detector
+      dockerfile: Dockerfile
+    image: face-recognition-custom-flink:latest
+    container_name: face-recognition-flink-taskmanager
+    command: taskmanager
+    environment:
+      FLINK_PROPERTIES: |
+        jobmanager.rpc.address: flink-jobmanager
+        taskmanager.numberOfTaskSlots: 4
+        metrics.reporters: prom
+        metrics.reporter.prom.factory.class: org.apache.flink.metrics.prometheus.PrometheusReporterFactory
+        metrics.reporter.prom.port: 9249
+    depends_on:
+      - flink-jobmanager
+    networks:
+      - face-recognition-network
+
+  flink-fraud-detector:
+    build:
+      context: ./streaming/fraud_detector
+      dockerfile: Dockerfile
+    image: face-recognition-custom-flink:latest
+    container_name: face-recognition-flink-fraud-detector
+    command: [ "flink", "run", "-m", "flink-jobmanager:8081", "-py", "/opt/flink/usrlib/flink_fraud_detector.py" ]
+    depends_on:
+      flink-jobmanager:
+        condition: service_started
+      flink-taskmanager:
+        condition: service_started
+      kafka:
+        condition: service_healthy
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_INPUT_TOPIC: access-logs
+      KAFKA_OUTPUT_TOPIC: alerts
+      SPAM_THRESHOLD: "5"
+      SPAM_WINDOW_SECONDS: "60"
+      BRUTE_FORCE_THRESHOLD: "10"
+      BRUTE_FORCE_WINDOW_SECONDS: "300"
+    networks:
+      - face-recognition-network
+
+
+  # Jenkins CI/CD
+  jenkins:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: face-recognition-jenkins
+    ports:
+      - "8082:8080"
+      - "50000:50000"
+    volumes:
+      - jenkins_data:/var/jenkins_home
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - face-recognition-network
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:
+  zookeeper_data:
+  zookeeper_logs:
+  kafka_data:
+  minio_data:
+  prometheus_data:
+  grafana_data:
+  jenkins_data:
+
+networks:
+  face-recognition-network:
+    driver: bridge

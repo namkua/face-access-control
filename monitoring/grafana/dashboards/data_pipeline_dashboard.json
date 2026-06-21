@@ -1,0 +1,181 @@
+{
+    "__inputs": [
+        {
+            "name": "DS_PROMETHEUS",
+            "label": "Prometheus",
+            "type": "datasource",
+            "pluginId": "prometheus"
+        }
+    ],
+    "annotations": {
+        "list": []
+    },
+    "editable": true,
+    "panels": [
+        {
+            "id": 1,
+            "title": "Kafka Consumer Lag (access-logs)",
+            "type": "timeseries",
+            "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+            },
+            "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+            "targets": [
+                {
+                    "expr": "kafka_consumergroup_lag{topic=\"access-logs\"}",
+                    "legendFormat": "Lag – {{consumergroup}} p{{partition}}"
+                }
+            ],
+            "fieldConfig": {
+                "defaults": { "unit": "short" }
+            }
+        },
+        {
+            "id": 2,
+            "title": "Kafka Messages In/s by Topic",
+            "type": "timeseries",
+            "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+            },
+            "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+            "targets": [
+                {
+                    "expr": "sum(rate(kafka_topic_partition_current_offset{job=\"kafka\"}[1m])) by (topic)",
+                    "legendFormat": "{{topic}}"
+                }
+            ],
+            "fieldConfig": {
+                "defaults": { "unit": "ops" }
+            }
+        },
+        {
+            "id": 3,
+            "title": "PostgreSQL Active Connections",
+            "type": "stat",
+            "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+            },
+            "gridPos": { "h": 8, "w": 6, "x": 0, "y": 8 },
+            "targets": [
+                {
+                    "expr": "pg_stat_activity_count{job=\"postgres\", state=\"active\"}",
+                    "legendFormat": "Active"
+                }
+            ],
+            "fieldConfig": {
+                "defaults": { "unit": "short" }
+            }
+        },
+        {
+            "id": 4,
+            "title": "PostgreSQL Database Size",
+            "type": "stat",
+            "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+            },
+            "gridPos": { "h": 8, "w": 6, "x": 6, "y": 8 },
+            "targets": [
+                {
+                    "expr": "pg_database_size_bytes{job=\"postgres\", datname=\"face_recognition\"}",
+                    "legendFormat": "face_recognition"
+                }
+            ],
+            "fieldConfig": {
+                "defaults": { "unit": "bytes" }
+            }
+        },
+        {
+            "id": 5,
+            "title": "Redis Connected Clients",
+            "type": "stat",
+            "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+            },
+            "gridPos": { "h": 8, "w": 6, "x": 12, "y": 8 },
+            "targets": [
+                {
+                    "expr": "redis_connected_clients{job=\"redis\"}",
+                    "legendFormat": "Clients"
+                }
+            ],
+            "fieldConfig": {
+                "defaults": { "unit": "short" }
+            }
+        },
+        {
+            "id": 6,
+            "title": "Redis Memory Usage",
+            "type": "stat",
+            "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+            },
+            "gridPos": { "h": 8, "w": 6, "x": 18, "y": 8 },
+            "targets": [
+                {
+                    "expr": "redis_memory_used_bytes{job=\"redis\"}",
+                    "legendFormat": "Used"
+                }
+            ],
+            "fieldConfig": {
+                "defaults": { "unit": "bytes" }
+            }
+        },
+        {
+            "id": 7,
+            "title": "PostgreSQL Rows (Predictions table)",
+            "type": "timeseries",
+            "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+            },
+            "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+            "targets": [
+                {
+                    "expr": "pg_stat_user_tables_n_tup_ins{job=\"postgres\", relname=\"predictions\"}",
+                    "legendFormat": "Inserted rows"
+                },
+                {
+                    "expr": "pg_stat_user_tables_n_live_tup{job=\"postgres\", relname=\"predictions\"}",
+                    "legendFormat": "Live rows"
+                }
+            ],
+            "fieldConfig": {
+                "defaults": { "unit": "short" }
+            }
+        },
+        {
+            "id": 8,
+            "title": "Kafka Topic Partitions & Offsets",
+            "type": "timeseries",
+            "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+            },
+            "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+            "targets": [
+                {
+                    "expr": "kafka_topic_partition_current_offset{job=\"kafka\", topic=~\"access-logs|events|alerts\"}",
+                    "legendFormat": "{{topic}} p{{partition}}"
+                }
+            ],
+            "fieldConfig": {
+                "defaults": { "unit": "short" }
+            }
+        }
+    ],
+    "schemaVersion": 38,
+    "tags": [
+        "face-recognition",
+        "data-pipeline",
+        "infrastructure"
+    ],
+    "title": "Data Pipeline & Infrastructure Dashboard",
+    "uid": "data-pipeline",
+    "version": 2
+}

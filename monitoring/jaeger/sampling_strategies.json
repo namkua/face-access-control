@@ -1,0 +1,18 @@
+{
+  "strategies": [
+    {
+      "service": "face-recognition-api",
+      "type": "probabilistic",
+      "param": 1.0
+    },
+    {
+      "service": "triton-inference-server",
+      "type": "probabilistic",
+      "param": 0.5
+    },
+    {
+      "type": "probabilistic",
+      "param": 0.1
+    }
+  ]
+}

@@ -1,0 +1,27 @@
+project: face_recognition
+provider: local
+registry:
+  registry_type: sql
+  path: postgresql+psycopg2://admin:changeme123@postgres:5432/face_recognition
+entity_key_serialization_version: 2
+
+# Online store: Redis for low-latency inference-time feature lookups
+online_store:
+  type: redis
+  connection_string: "redis:6379"
+
+# Offline store: PostgreSQL for production and K8s deployments
+offline_store:
+  type: postgres
+  host: postgres
+  port: 5432
+  database: face_recognition
+  db_schema: feast
+  user: admin
+  password: changeme123
+  sslmode: disable
+
+# Feature serving options
+flags:
+  alpha_features: true
+  on_demand_transforms: true

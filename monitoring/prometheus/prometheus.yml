@@ -1,0 +1,94 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: 'face-recognition-mlops'
+    environment: 'development'
+
+# Alertmanager configuration
+# alerting:
+#   alertmanagers:
+#     - static_configs:
+#         - targets:
+#             # - alertmanager:9093
+
+# Load rules once and periodically evaluate them
+rule_files:
+  - "alerts.yml"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Scrape configurations
+#
+# Job names and metrics_path are kept identical to the K8s Helm chart
+# (helm/monitoring/prometheus) so dashboards and alert rules work in both
+# environments without modification.
+# ─────────────────────────────────────────────────────────────────────────────
+scrape_configs:
+
+  # ── Application ────────────────────────────────────────────────────────────
+
+  # FastAPI Application (same job_name as K8s: "face-recognition-api")
+  - job_name: 'face-recognition-api'
+    static_configs:
+      - targets: ['api:8000']
+    metrics_path: '/metrics'
+    scrape_interval: 10s
+
+  # Triton Inference Server (matches K8s Helm scrape target)
+  - job_name: 'triton'
+    static_configs:
+      - targets: ['triton:8002']
+    scrape_interval: 15s
+
+  # ── Monitoring infrastructure ──────────────────────────────────────────────
+
+  # Prometheus itself
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # Jaeger internal metrics
+  - job_name: 'jaeger'
+    static_configs:
+      - targets: ['jaeger:14269']
+    scrape_interval: 15s
+
+  # ── Infrastructure exporters ───────────────────────────────────────────────
+
+  # PostgreSQL Exporter
+  - job_name: 'postgres'
+    static_configs:
+      - targets: ['postgres-exporter:9187']
+    scrape_interval: 15s
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+        replacement: 'postgres'
+
+  # Redis Exporter
+  - job_name: 'redis'
+    static_configs:
+      - targets: ['redis-exporter:9121']
+    scrape_interval: 15s
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+        replacement: 'redis'
+
+  # Kafka Exporter
+  - job_name: 'kafka'
+    static_configs:
+      - targets: ['kafka-exporter:9308']
+    scrape_interval: 15s
+
+  # Node Exporter (host metrics)
+  - job_name: 'node'
+    static_configs:
+      - targets: ['node-exporter:9100']
+    scrape_interval: 15s
+
+  # Flink JobManager and TaskManager
+  - job_name: 'flink'
+    static_configs:
+      - targets: ['flink-jobmanager:9249', 'flink-taskmanager:9249']
+    scrape_interval: 15s

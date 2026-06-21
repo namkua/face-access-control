@@ -1,0 +1,30 @@
+name: "facenet"
+backend: "onnxruntime"
+max_batch_size: 8
+
+# Input: face crop (3-channel, 160x160, already normalized to [-1, 1])
+input [
+  {
+    name: "input"
+    data_type: TYPE_FP32
+    dims: [ 3, 160, 160 ]
+  }
+]
+
+# Output: 512-dim L2-normalised face embedding
+output [
+  {
+    name: "output"
+    data_type: TYPE_FP32
+    dims: [ 512 ]
+  }
+]
+
+# Single CPU instance – keeps RAM usage minimal for local development.
+# Increase count or add GPU instance for production.
+instance_group [
+  {
+    count: 1
+    kind: KIND_CPU
+  }
+]

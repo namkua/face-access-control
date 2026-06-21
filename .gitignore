@@ -1,0 +1,107 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual Environment
+venv/
+env/
+ENV/
+.venv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+*.cover
+.hypothesis/
+
+# Jupyter
+.ipynb_checkpoints
+
+# Logs
+*.log
+logs/
+
+# Data
+data/
+*.csv
+*.parquet
+*.db
+*.sqlite
+
+# Models – exclude large binary files; keep structure + config files
+models/**/*.onnx
+models/**/*.h5
+models/**/*.pkl
+models/**/*.pt
+!models/**/.gitkeep
+!models/**/config.pbtxt
+# Feast registry (auto-generated)
+features/feature_store_registry.db
+features/online_store.db
+
+# MinIO/S3
+.minio.sys/
+
+# Terraform
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.lock.hcl
+
+# Kubernetes
+secrets.yaml
+*-secret.yaml
+
+# Docker
+docker-compose.override.yml
+
+# MLflow
+mlruns/
+mlartifacts/
+
+# Airflow
+airflow/logs/
+airflow/*.db
+airflow/*.pid
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Temporary files
+tmp/
+temp/
+*.tmp
