@@ -1,49 +1,84 @@
-# 🚀 Face Recognition MLOps System
+# Face Recognition MLOps System
 
 A production-ready, enterprise-grade face recognition system featuring a complete MLOps pipeline and real-time processing running locally via Docker Compose. Built on modern open-source technologies including FastAPI, NVIDIA Triton Inference Server, Feast Feature Store, Kafka, Flink, Spark, Airflow, and Prometheus/Grafana, this project demonstrates a complete ML lifecycle from user onboarding and feature extraction through high-throughput serving and distributed observability.
 
-![Architecture](image - Place the System Architecture Diagram here (e.g. ./docs/pipeline.png or docs/architecture.png))
+<img src="images/pipeline.png" height="700" alt="Architecture">
 
-## 📑 Table of Contents
+## Table of Contents
 
-- [📊 Dataset & Schemas](#-dataset--schemas)
+- [Project Structure](#project-structure)
+- [Dataset & Schemas](#dataset--schemas)
   - [User Schema](#user-schema)
   - [Prediction Logs Schema](#prediction-logs-schema)
   - [Check-In Records Schema](#check-in-records-schema)
   - [Feature Engineering & Feature Store](#feature-engineering--feature-store)
-- [🌐 Architecture Overview](#-architecture-overview)
+- [Architecture Overview](#architecture-overview)
   - [1. Data & Streaming Pipeline](#1-data--streaming-pipeline)
-    - [📤 Data Sources](#-data-sources)
-    - [✅ Input Validation](#-input-validation)
-    - [☁️ Storage Layer](#-storage-layer)
-    - [🛒 Stream Processing](#-stream-processing)
+    - [Data Sources](#data-sources)
+    - [Input Validation](#input-validation)
+    - [Storage Layer](#storage-layer)
+    - [Stream Processing](#stream-processing)
   - [2. Orchestration & Batch Processing](#2-orchestration--batch-processing)
-    - [🌟 Employee Onboarding](#-employee-onboarding)
-    - [📦 Batch Aggregations](#-batch-aggregations)
+    - [Employee Onboarding](#employee-onboarding)
+    - [Batch Aggregations](#batch-aggregations)
   - [3. Serving Pipeline](#3-serving-pipeline)
-    - [⚡ Model Serving (Triton)](#-model-serving-triton)
-    - [🔍 Feature Service (Feast)](#-feature-service-feast)
+    - [Model Serving (Triton)](#model-serving-triton)
+    - [Feature Service (Feast)](#feature-service-feast)
   - [4. Observability & Security](#4-observability--security)
-    - [📡 Metrics & Dashboards](#-metrics--dashboards)
-    - [🔒 Access & Security Management](#-access--security-management)
-- [📖 Details](#-details)
-  - [🔧 Setup Environment Variables](#-setup-environment-variables)
-  - [🏁 Start MLOps Services (Local)](#-start-mlops-services-local)
-  - [✅ Initialize Database & Feature Store](#-initialize-database--feature-store)
-  - [🚀 Interact with the Serving Pipeline](#-interact-with-the-serving-pipeline)
-  - [🔄 Start Orchestration & Batch Pipelines](#-start-orchestration--batch-pipelines)
-  - [🔎 Start Observability](#-start-observability)
-  - [📁 Project Structure](#-project-structure)
-  - [🧪 Testing](#-testing)
-  - [💡 Tips & Troubleshooting](#-tips--troubleshooting)
-- [🤝 Contributing](#-contributing)
-- [📃 License](#-license)
-- [🙏 Acknowledgments](#-acknowledgments)
-- [📞 Support](#-support)
+    - [Metrics & Dashboards](#metrics--dashboards)
+    - [Access & Security Management](#access--security-management)
+- [Details](#details)
+  - [Prerequisites & Model Export](#prerequisites--model-export)
+  - [Setup Environment Variables](#setup-environment-variables)
+  - [Start MLOps Services (Local)](#start-mlops-services-local)
+  - [Initialize Database](#initialize-database)
+  - [Interact with the Serving API](#interact-with-the-serving-api)
+  - [Object Storage (MinIO)](#object-storage-minio)
+  - [Real-Time Streaming & Fraud Detection (Flink)](#real-time-streaming--fraud-detection-flink)
+  - [Start Orchestration & Batch Pipelines (Airflow & Spark)](#start-orchestration--batch-pipelines-airflow--spark)
+  - [Start Observability](#start-observability)
 
 ---
 
-## 📊 Dataset & Schemas
+## Project Structure
+
+```
+face-recognition-mlops/
+ api/                        # FastAPI application
+    main.py                # App entry point
+    config.py              # Configuration
+    models.py              # Database models
+    schemas.py             # Pydantic schemas
+    routes/                # API endpoints
+    services/              # Business logic
+    tests/                 # Unit tests
+ airflow/                    # Airflow orchestration
+    dags/                  # DAG definitions
+       daily_pipeline.py  # Daily batch processing
+       employee_onboarding_dag.py # Onboarding
+    batch/                 # Apache Spark batch jobs
+        spark_daily_aggregation.py
+ features/                   # Feast feature store
+    feast_features.py      # Feature definitions
+    feast_client.py        # Client wrapper
+    feature_store.yaml     # Feature store configs
+ scripts/                    # Utility scripts
+    data_generator.py      # Generate test data
+    export_facenet_onnx.py # Convert FaceNet to ONNX
+    feast_init.sh          # Feast DB initializer
+    backup_restore.sh      # Backup utilities
+ monitoring/                 # Monitoring configs
+    prometheus/            # Prometheus setup
+    grafana/               # Grafana dashboards
+ docker-compose.yml          # Local development
+ Jenkinsfile                 # CI/CD pipeline
+ requirements.txt            # Python dependencies
+ README.md                   # This file
+```
+
+---
+
+## Dataset & Schemas
 
 > Face Recognition Onboarding and Check-In Activity Records
 
@@ -114,52 +149,51 @@ Key registered features in Feast:
 
 ---
 
-## 🌐 Architecture Overview
+## Architecture Overview
+
 
 The face recognition system encompasses four main stages: **API & Serving**, **Data & Streaming**, **Orchestration & Batch Processing**, and **Observability & Security**.
 
-![Architecture Details](image - Suggestion: Place a detailed architectural workflow or dataflow diagram here (e.g., ./docs/detailed_architecture.png))
-
 ### 1. Data & Streaming Pipeline
 
-#### 📤 Data Sources
+#### Data Sources
 - **FastAPI Endpoint**: Receives uploaded check-in photos and writes raw images to MinIO storage.
 - **Kafka Producer**: Streams check-in logs and security alerts (`tracking.access_logs`, `tracking.alerts`) for real-time downstream analytics.
 
-#### ✅ Input Validation
+#### Input Validation
 - **OpenCV & MTCNN**: Performs image decoding, verifies face presence, and calculates image quality metrics before running model inference.
 - **Pydantic**: Enforces strict payload validation on REST endpoints.
 
-#### ☁️ Storage Layer
+#### Storage Layer
 - **MinIO Object Store**: Houses raw/processed images and serves as the Delta Lake storage layer.
 - **PostgreSQL Database**: Holds user credentials, transaction prediction tables, and check-in logs.
 - **Redis Online Store**: Manages real-time embeddings for instant cosine-similarity matching.
 
-#### 🛒 Stream Processing
+#### Stream Processing
 - **Apache Flink**: Analyzes Kafka access logs in real-time, enforcing security policies (e.g., detecting brute-force login attempts and repeated check-in failures) and pushing alerts.
 
 ---
 
 ### 2. Orchestration & Batch Processing
 
-#### 🌟 Employee Onboarding
+#### Employee Onboarding
 - **Apache Airflow**: Coordinates multi-stage on-demand employee registration workflows.
   - Validates employee data and uploads.
   - Extracts 512-dim facial vectors.
   - Pushes embeddings to Feast (Redis and PostgreSQL).
   - Verifies registration with test prediction tasks.
 
-#### 📦 Batch Aggregations
+#### Batch Aggregations
 - **Apache Spark**: Executes daily batch ETL pipelines over historical access logs, generating performance dashboards and writing structured results to Delta Lake tables.
 
 ---
 
 ### 3. Serving Pipeline
 
-#### ⚡ Model Serving (Triton)
+#### Model Serving (Triton)
 - **NVIDIA Triton Inference Server**: Loads the exported FaceNet ONNX model. Uses dynamic batching (up to 32 requests) and CPU/GPU-friendly serving to achieve under 100ms inference latency.
 
-#### 🔍 Feature Service (Feast)
+#### Feature Service (Feast)
 - **Feast Retrieval Client**: Retrieves registered embeddings from Redis online store with sub-5ms lookup latency.
 - **Cosine Similarity Engine**: Compares Triton's output embedding with the Feast feature vector using numpy cosine-similarity to identify the employee (matching threshold: 0.6).
 
@@ -167,29 +201,49 @@ The face recognition system encompasses four main stages: **API & Serving**, **D
 
 ### 4. Observability & Security
 
-#### 📡 Metrics & Dashboards
+#### Metrics & Dashboards
 - **Prometheus & Grafana**: Scraping application metrics (latencies, counts, accuracy, confidence levels) and displaying pre-configured Grafana dashboards.
 - **Jaeger**: Traces requests across all microservices (API, Triton, Redis, Postgres, MinIO).
 
-#### 🔒 Access & Security Management
+#### Access & Security Management
 - **Secrets**: Encrypted using `.env` configs.
 - **Validation**: Pydantic input validation, SQLAlchemy ORM for SQL injection protection.
 
 ---
 
-## 📖 Details
+## Details
 
-### 🔧 Setup Environment Variables
+### Prerequisites & Model Export
 
-Create a `.env` file in the root directory:
+Before starting the containers, NVIDIA Triton Inference Server requires the FaceNet model to be exported and structured correctly in the `./models/` directory.
 
+1. Install the local python requirements (preferably in a virtual environment):
+   ```bash
+   pip install -r requirements.txt
+   ```
+2. Run the ONNX conversion script to fetch the pre-trained FaceNet weights and export them to ONNX format:
+   ```bash
+   python scripts/export_facenet_onnx.py
+   ```
+   *This creates a structured directory `models/facenet/1/model.onnx` along with the Triton configuration file `models/facenet/config.pbtxt`.*
+
+---
+
+### Setup Environment Variables
+
+Configure your local environment parameters by copying the example file:
+```bash
+cp .env.example .env
+```
+
+Ensure the `.env` contents match your local ports and credentials:
 ```bash
 # Application
 ENVIRONMENT=production
 LOG_LEVEL=INFO
 API_WORKERS=4
 
-# Database
+# Database & Cache
 DATABASE_URL=postgresql://user:pass@localhost:5432/facedb
 REDIS_URL=redis://localhost:6379/0
 
@@ -201,7 +255,7 @@ MINIO_ENDPOINT=localhost:9000
 MINIO_ACCESS_KEY=minioadmin
 MINIO_SECRET_KEY=minioadmin
 
-# Model
+# Model Serving
 MODEL_NAME=Facenet512
 MODEL_THRESHOLD=0.6
 TRITON_URL=localhost:8000
@@ -211,208 +265,129 @@ PROMETHEUS_PORT=9090
 JAEGER_AGENT_HOST=localhost
 ```
 
-### 🏁 Start MLOps Services (Local)
+---
 
-Launch directly with Docker Compose:
+### Start MLOps Services (Local)
 
+Launch all core infrastructure, microservices, and metrics exporters using Docker Compose:
 ```bash
 docker-compose up -d
+```
+
+Verify that all services are healthy and running:
+```bash
 docker-compose ps
 ```
 
-### ✅ Initialize Database & Feature Store
+---
 
-After starting your services, apply Alembic migrations to setup the PostgreSQL tables, and apply the Feast configurations to register feature views.
+### Initialize Database
 
-```bash
-# 1. Run database migrations
-docker-compose exec api alembic upgrade head
+Once the databases are active, initialize the schemas:
 
-# 2. Initialize and apply Feast schema
-docker-compose exec api /bin/bash -c "cd /app/features && feast apply"
-```
+1. **Apply Alembic Migrations (Required):** Setup relational tables (`users`, `prediction_logs`, `check_in_records`) in PostgreSQL. This step is **manual** and must be run once:
+   ```bash
+   docker-compose exec api alembic upgrade head
+   ```
 
-### 🚀 Interact with the Serving Pipeline
+---
 
-Perform your first API requests to verify endpoints:
+### Interact with the Serving API
 
-```bash
-# 1. Register an employee user account
-curl -X POST http://localhost:8000/api/v1/users \
-  -F "email=admin@example.com" \
-  -F "username=admin" \
-  -F "full_name=Admin User"
+The FastAPI serving API provides endpoints to onboard employees, register face photos, and perform real-time verification.
 
-# 2. Register a face photo for the employee
-curl -X POST http://localhost:8000/api/v1/users/admin/register-face \
-  -F "file=@face_photo.jpg"
+![API Swagger UI](./images/APISwagger.png)
 
-# 3. Request face prediction check-in
-curl -X POST http://localhost:8000/api/v1/predict \
-  -F "file=@face_photo.jpg"
-```
+---
 
-### 🔄 Start Orchestration & Batch Pipelines
+### Object Storage (MinIO)
+
+MinIO acts as the local S3-compatible object storage layer for raw image storage, raw data lake telemetry, and the processed batch analytics catalog.
+
+- **Access Console:** Open the MinIO web dashboard at `http://localhost:9001` (login credentials: `minioadmin` / `minioadmin`).
+- **Buckets Configuration:**
+  - `raw-images`: Stores all raw uploaded face photos from onboarding and check-in FastAPI calls.
+  - `access-logs-lake`: Serves as the raw Data Lake storage. Kafka Connect S3 Sink streams access log telemetry events directly into this bucket (partitioned by Year/Month/Day) to be processed by Spark.
+  - `processed-data`: Serves as the storage backend for Apache Spark batch ETL outputs and aggregated Delta Lake tables.
+
+![MinIO Console](./images/MinIOConsole.png)
+
+---
+
+### Real-Time Streaming & Fraud Detection (Flink)
+
+The Flink streaming engine monitors face check-in events in real-time to detect anomalous or fraudulent access behaviors.
+
+1. **Streaming Logic:**
+   - Every face prediction event publishes telemetry to Kafka on the `access-logs` topic.
+   - The Apache Flink job (`streaming/fraud_detector/flink_fraud_detector.py`) consumes from this topic and tracks events using a sliding window.
+   - If a user triggers repeated failed check-ins (e.g., 5 failures within 60 seconds), Flink flags it as a security event and publishes to the `alerts` topic.
+2. **Accessing Web Console:**
+   - Monitor job graph, slot allocation, and flamegraphs at the **Flink Web UI** (`http://localhost:8088`).
+
+![Flink UI](./images/FlinkDashboard.png)
+
+---
+
+### Start Orchestration & Batch Pipelines (Airflow & Spark)
 
 #### Apache Airflow (Workflow Orchestration)
-Access the Airflow UI at `http://localhost:8081` (admin/admin).
-The DAGs are defined under `airflow/dags/`:
-- `employee_onboarding_dag`: Automates the registration pipelines.
-- `daily_pipeline`: Runs batch analytical ETL jobs.
+Access the Airflow UI at `http://localhost:8081` (default credentials: `admin` / `admin`).
+The system provisions the following DAGs:
+- **`employee_onboarding`**: Orchestrates onboarding workflows (validates employee photos, calls Triton to extract embeddings, updates Feast online/offline stores, and generates validation logs).
+- **`daily_batch_processing`**: Coordinates batch ETL processes, executing daily Spark aggregate analytics over check-in history logs.
+- **`feast_materialize_incremental`**: Automatically materializes (syncs) features hourly from PostgreSQL (Offline Store) to Redis (Online Store) to ensure the fast online cache is kept up-to-date.
+
+![Airflow UI](./images/AirflowDashboard.png)
 
 #### Apache Spark (Batch Processing)
-Spark jobs run via Airflow or can be invoked locally for batch analytics:
-```bash
-# Trigger local Spark daily aggregate report
-python airflow/batch/spark_daily_aggregation.py
-```
+Spark is used to process long-term historical check-in logs and calculate aggregates (e.g., daily attendance reports, confidence decay analysis):
+- Airflow schedules and triggers Spark jobs in the background.
+- You can manually invoke the Spark daily aggregation script inside the environment:
+  ```bash
+  python airflow/batch/spark_daily_aggregation.py
+  ```
 
-### 🔎 Start Observability
+---
 
-#### Prometheus & Grafana
-Verify that metrics scraping is operational and access dashboards.
+### Start Observability
 
-| Observability Endpoint | URL | Credentials |
+The platform provides comprehensive monitoring and tracing across the entire serving and processing lifecycle.
+
+#### Observability Quick Links
+| Service / Dashboard | Local URL | Description / Credentials |
 | :--- | :--- | :--- |
-| **Prometheus Metrics** | http://localhost:9090 | - |
-| **Grafana Dashboard** | http://localhost:3000 | `admin` / `admin` |
-| **Kafka UI** | http://localhost:8080 | - |
-| **MinIO Console** | http://localhost:9001 | `minioadmin` / `minioadmin` |
-| **Flink Web UI** | http://localhost:8088 | - |
+| **Prometheus** | http://localhost:9090 | System and exporter metrics scraper |
+| **Grafana** | http://localhost:3000 | Dashboards for API performance and model quality (`admin` / `admin`) |
+| **Jaeger UI** | http://localhost:16686 | Distributed request tracing to isolate serving bottlenecks |
 
-![Grafana Dashboards](image - Suggestion: Place a screenshot of Grafana dashboards showing API metrics, prediction confidence, and system health here (e.g. ./docs/grafana_dashboards.png))
 
-#### Jaeger (Distributed Tracing)
-Enables profiling of end-to-end inference workflows to isolate latency bottlenecks. Access the Jaeger query portal at `http://localhost:16686`.
+#### Metrics Scraping & Monitoring (Prometheus & Grafana)
+- **Prometheus UI (`http://localhost:9090`)**: Scrapes performance metrics from FastAPI, Triton Inference Server, PostgreSQL Exporter, Redis Exporter, Kafka Exporter, and Flink metrics reporters.
+- **Grafana Dashboards (`http://localhost:3000`)**:
+  - Sign in using `admin` / `admin`.
+  - The project comes with pre-configured dashboards displaying API throughput, serving latency percentiles, Triton server load, model inference confidence levels, and active Kafka message lags.
+  - *Dashboards are auto-loaded from `monitoring/grafana/dashboards`.*
 
----
+![Grafana Dashboard](./images/GrafanaDashboard.png)
 
-### 📁 Project Structure
+#### Distributed Tracing (Jaeger)
+- **Jaeger UI (`http://localhost:16686`)**:
+  - Used for tracing end-to-end request latency.
+  - To trace a request:
+    1. Make a prediction call: `curl -X POST http://localhost:8000/api/v1/predict -F "file=@face_photo.jpg"`
+    2. Open Jaeger UI, select service `face-recognition-api`, and click **Find Traces**.
+    3. Click on the trace to view the exact breakdown of database queries, Triton model execution times, and Feast feature retrieval latencies.
 
-```
-face-recognition-mlops/
-├── api/                        # FastAPI application
-│   ├── main.py                # App entry point
-│   ├── config.py              # Configuration
-│   ├── models.py              # Database models
-│   ├── schemas.py             # Pydantic schemas
-│   ├── routes/                # API endpoints
-│   ├── services/              # Business logic
-│   └── tests/                 # Unit tests
-├── airflow/                    # Airflow orchestration
-│   ├── dags/                  # DAG definitions
-│   │   ├── daily_pipeline.py  # Daily batch processing
-│   │   └── employee_onboarding_dag.py # Onboarding
-│   └── batch/                 # Apache Spark batch jobs
-│       └── spark_daily_aggregation.py
-├── features/                   # Feast feature store
-│   ├── feast_features.py      # Feature definitions
-│   ├── feast_client.py        # Client wrapper
-│   └── feature_store.yaml     # Feature store configs
-├── scripts/                    # Utility scripts
-│   ├── data_generator.py      # Generate test data
-│   ├── export_facenet_onnx.py # Convert FaceNet to ONNX
-│   ├── feast_init.sh          # Feast DB initializer
-│   └── backup_restore.sh      # Backup utilities
-├── monitoring/                 # Monitoring configs
-│   ├── prometheus/            # Prometheus setup
-│   └── grafana/               # Grafana dashboards
-├── docker-compose.yml          # Local development
-├── Jenkinsfile                 # CI/CD pipeline
-├── requirements.txt            # Python dependencies
-└── README.md                   # This file
-```
+![Jaeger UI](./images/JaegerUI.png)
 
-### 🧪 Testing
+#### Message Queue Monitoring (Kafka UI)
+- **Kafka UI (`http://localhost:8080`)**:
+  - Allows developers to browse and inspect Kafka topics.
+  - Inspect messages in topics: `access-logs` (published by FastAPI for check-in attempts), `alerts` (published by Flink for anomalies), and `events` (published by FastAPI for admin events like user creation or registration triggers).
+  - Track consumer group positions to verify if the Flink job or Kafka Connect tasks are lagging.
 
-Run code quality, unit, integration, and load tests:
+![Kafka UI](./images/KafkaUI.png)
 
-```bash
-# Run pytest unit tests
-pytest
 
-# Generate coverage reports
-pytest --cov=api --cov-report=html
 
-# Run specific unit test files
-pytest api/tests/unit/test_face_recognition.py
-
-# Run integration tests
-pytest api/tests/integration/
-
-# Execute load testing using Locust
-locust -f api/tests/load_tests.py
-```
-
-### 💡 Tips & Troubleshooting
-
-#### Quick Diagnostic Commands
-```bash
-# View live API service logs
-docker-compose logs -f api
-
-# Verify Triton Inference Server status
-curl http://localhost:8000/v2/health/ready
-
-# Check registered Feast feature views
-feast feature-views list
-```
-
-#### Common Issues
-
-**Issue: API container crashes during startup**
-Verify database connections and migrations:
-```bash
-docker-compose logs api
-docker-compose exec api python -c "from api.database import engine; print(engine)"
-```
-
-**Issue: Low prediction/recognition accuracy**
-Adjust confidence matching threshold parameters in your `.env` file:
-```bash
-# Decrease threshold (e.g. 0.5) to allow more matches
-MODEL_THRESHOLD=0.5
-```
-
-**Issue: High latency during peaks**
-Enable Triton dynamic batching:
-```yaml
-# Add dynamic batching configuration in models/facenet/config.pbtxt
-dynamic_batching { }
-```
-
----
-
-## 🤝 Contributing
-
-Contributions are welcome! Please follow these steps:
-1. Fork the repository.
-2. Create a feature branch (`git checkout -b feature/AmazingFeature`).
-3. Commit your changes (`git commit -m 'Add some AmazingFeature'`).
-4. Push to the branch (`git push origin feature/AmazingFeature`).
-5. Open a Pull Request.
-
----
-
-## 📃 License
-
-Distributed under the MIT License. See [LICENSE](LICENSE) for more information.
-
----
-
-## 🙏 Acknowledgments
-
-- [DeepFace](https://github.com/serengil/deepface) - Face recognition library
-- [NVIDIA Triton Inference Server](https://github.com/triton-inference-server/server) - High-performance model serving
-- [Feast Feature Store](https://github.com/feast-dev/feast) - MLOps features engine
-- [FastAPI](https://github.com/tiangolo/fastapi) - Modern web API framework
-
----
-
-## 📞 Support
-
-- 📧 Email: support@example.com
-- 💬 Slack: `#face-recognition`
-- 📝 Issues: [GitHub Issues](https://github.com/your-org/face-recognition-mlops/issues)
-
-**Built with ❤️ for production-grade MLOps**
